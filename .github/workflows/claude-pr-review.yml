@@ -1,0 +1,94 @@
+name: Claude PR Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: claude-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log review start
+        run: |
+          echo "========================================="
+          echo "🔍 Claude PR Review 시작"
+          echo "========================================="
+          echo "📌 PR: #${{ github.event.pull_request.number }}"
+          echo "📝 제목: ${{ github.event.pull_request.title }}"
+          echo "👤 작성자: ${{ github.event.pull_request.user.login }}"
+          echo "🔀 브랜치: ${{ github.head_ref }} → ${{ github.base_ref }}"
+          echo "📊 변경: +${{ github.event.pull_request.additions }} / -${{ github.event.pull_request.deletions }}"
+          echo "========================================="
+
+      - name: Get incremental diff
+        if: github.event.action == 'synchronize'
+        id: incremental
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          echo "Incremental diff: ${BEFORE}..${AFTER}"
+          DIFF=$(git diff "${BEFORE}..${AFTER}" -- . ':!pnpm-lock.yaml' ':!*.d.ts' ':!.github/')
+          {
+            echo "diff<<DIFF_EOF"
+            echo "$DIFF"
+            echo "DIFF_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude PR Review (full)
+        if: github.event.action != 'synchronize'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          prompt: |
+            PR #${{ github.event.pull_request.number }} (${{ github.head_ref }} → ${{ github.base_ref }})의 변경사항을 리뷰해주세요.
+            .claude/rules/의 리뷰 규칙을 따라 리뷰합니다.
+            `mcp__github_inline_comment__create_inline_comment`으로 인라인 코멘트를 남기세요.
+
+            ## 필수 효율 규칙
+            - TodoWrite 사용 금지
+            - 독립적인 도구 호출은 반드시 한 턴에 병렬로 실행 (파일 읽기, 인라인 코멘트 작성 등)
+            - 변경된 파일 유형에 해당하는 스킬만 읽기 (테스트 파일 없으면 테스트 스킬 읽지 않음)
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+
+      - name: Run Claude PR Review (synchronize)
+        if: github.event.action == 'synchronize' && steps.check_skip.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          prompt: |
+            PR #${{ github.event.pull_request.number }}에 새로운 커밋이 push되었습니다. 아래 incremental-diff에 명시되어있는 **새로 추가된 변경사항만** 리뷰해주세요.
+            .claude/rules/의 리뷰 규칙을 따라 리뷰합니다.
+            `mcp__github_inline_comment__create_inline_comment`으로 인라인 코멘트를 남기세요.
+
+            ## 필수 효율 규칙
+            - TodoWrite 사용 금지
+            - 독립적인 도구 호출은 반드시 한 턴에 병렬로 실행 (파일 읽기, 인라인 코멘트 작성 등)
+            - 변경된 파일 유형에 해당하는 스킬만 읽기 (테스트 파일 없으면 테스트 스킬 읽지 않음)
+
+            <incremental-diff>
+            ${{ steps.incremental.outputs.diff }}
+            </incremental-diff>
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+
+      - name: Log review complete
+        if: always()
+        run: |
+          echo "========================================="
+          echo "✅ Claude PR Review 완료"
+          echo "========================================="
