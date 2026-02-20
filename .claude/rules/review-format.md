@@ -20,7 +20,6 @@
 근거에는 이 코멘트가 어떤 문서의 어떤 규칙을 기반으로 작성되었는지 명시합니다.
 
 - 예: `📎 **근거**: .agents/skills/petfriends-coding-guide/rules/props-typing.md > ReactNode 명시`
-- `.claude/rules/`, `.agents/skills/` 내의 문서를 참조한 경우 해당 파일 경로와 규칙명을 기재합니다.
 
 ## 심각도 분류
 
